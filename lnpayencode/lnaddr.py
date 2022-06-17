@@ -1,16 +1,12 @@
-#! /usr/bin/env python3
 from bech32 import bech32_encode, bech32_decode, CHARSET
 from binascii import hexlify, unhexlify
-from bitstring import BitArray
 from decimal import Decimal
 
 import base58
 import bitstring
 import hashlib
-import math
 import re
 import secp256k1
-import sys
 import time
 
 
@@ -31,16 +27,17 @@ def shorten_amount(amount):
             break
     return str(amount) + unit
 
+
 def unshorten_amount(amount):
     """ Given a shortened amount, convert it into a decimal
     """
     # BOLT #11:
     # The following `multiplier` letters are defined:
     #
-    #* `m` (milli): multiply by 0.001
-    #* `u` (micro): multiply by 0.000001
-    #* `n` (nano): multiply by 0.000000001
-    #* `p` (pico): multiply by 0.000000000001
+    # * `m` (milli): multiply by 0.001
+    # * `u` (micro): multiply by 0.000001
+    # * `n` (nano): multiply by 0.000000001
+    # * `p` (pico): multiply by 0.000000000001
     units = {
         'p': 10**12,
         'n': 10**9,
@@ -51,13 +48,14 @@ def unshorten_amount(amount):
     # BOLT #11:
     # A reader SHOULD fail if `amount` contains a non-digit, or is followed by
     # anything except a `multiplier` in the table above.
-    if not re.fullmatch("\d+[pnum]?", str(amount)):
+    if not re.fullmatch(r"\d+[pnum]?", str(amount)):
         raise ValueError("Invalid amount '{}'".format(amount))
 
     if unit in units.keys():
         return Decimal(amount[:-1]) / units[unit]
     else:
         return Decimal(amount)
+
 
 # Bech32 spits out array of 5-bit values.  Shim here.
 def u5_to_bitarray(arr):
@@ -66,6 +64,7 @@ def u5_to_bitarray(arr):
         ret += bitstring.pack("uint:5", a)
     return ret
 
+
 def bitarray_to_u5(barr):
     assert barr.len % 5 == 0
     ret = []
@@ -73,6 +72,7 @@ def bitarray_to_u5(barr):
     while s.pos != s.len:
         ret.append(s.read(5).uint)
     return ret
+
 
 def encode_fallback(fallback, currency):
     """ Encode all supported fallback addresses.
@@ -99,15 +99,14 @@ def encode_fallback(fallback, currency):
     else:
         raise NotImplementedError("Support for currency {} not implemented".format(currency))
 
+
 def parse_fallback(fallback, currency):
     if currency == 'bc' or currency == 'tb':
         wver = fallback[0:5].uint
         if wver == 17:
-            addr=base58.b58encode_check(bytes([base58_prefix_map[currency][0]])
-                                        + fallback[5:].tobytes())
+            addr = base58.b58encode_check(bytes([base58_prefix_map[currency][0]]) + fallback[5:].tobytes())
         elif wver == 18:
-            addr=base58.b58encode_check(bytes([base58_prefix_map[currency][1]])
-                                        + fallback[5:].tobytes())
+            addr = base58.b58encode_check(bytes([base58_prefix_map[currency][1]]) + fallback[5:].tobytes())
         elif wver <= 16:
             addr=bech32_encode(currency, bitarray_to_u5(fallback))
         else:
@@ -123,11 +122,14 @@ base58_prefix_map = {
     'tb' : (111, 196)
 }
 
+
 def is_p2pkh(currency, prefix):
     return prefix == base58_prefix_map[currency][0]
 
+
 def is_p2sh(currency, prefix):
     return prefix == base58_prefix_map[currency][1]
+
 
 # Tagged field containing BitArray
 def tagged(char, l):
@@ -150,11 +152,13 @@ def trim_to_bytes(barr):
         return b[:-1]
     return b
 
+
 # Try to pull out tagged data: returns tag, tagged data and remainder.
 def pull_tagged(stream):
     tag = stream.read(5).uint
     length = stream.read(5).uint * 32 + stream.read(5).uint
     return (CHARSET[tag], stream.read(length * 5), stream)
+
 
 def lnencode(addr, privkey):
     if addr.amount:
@@ -220,7 +224,7 @@ def lnencode(addr, privkey):
         raise ValueError("Cannot include both 'd' and 'h'")
     if not 'd' in tags_set and not 'h' in tags_set:
         raise ValueError("Must include either 'd' or 'h'")
-    
+
     # We actually sign the hrp, then data (padded to 8 bits with zeroes).
     privkey = secp256k1.PrivateKey(bytes(unhexlify(privkey)))
     sig = privkey.ecdsa_sign_recoverable(bytearray([ord(c) for c in hrp]) + data.tobytes())
@@ -229,6 +233,7 @@ def lnencode(addr, privkey):
     data += bytes(sig) + bytes([recid])
 
     return bech32_encode(hrp, bitarray_to_u5(data))
+
 
 class LnAddr(object):
     def __init__(self, paymenthash=None, amount=None, currency='bc', tags=None, date=None):
@@ -247,6 +252,7 @@ class LnAddr(object):
             self.amount, self.currency,
             ", ".join([k + '=' + str(v) for k, v in self.tags])
         )
+
 
 def lndecode(a, verbose=False):
     hrp, data = bech32_decode(a)
@@ -270,7 +276,7 @@ def lndecode(a, verbose=False):
     addr = LnAddr()
     addr.pubkey = None
 
-    m = re.search("[^\d]+", hrp[2:])
+    m = re.search(r"[^\d]+", hrp[2:])
     if m:
         addr.currency = m.group(0)
         amountstr = hrp[2+m.end():]
@@ -293,7 +299,7 @@ def lndecode(a, verbose=False):
         # `version`, or a `p`, `h`, or `n` field which does not have
         # `data_length` 52, 52, or 53 respectively.
         data_length = len(tagdata) / 5
-        
+
         if tag == 'r':
             # BOLT #11:
             #
@@ -313,7 +319,7 @@ def lndecode(a, verbose=False):
                               s.read(32).intbe,
                               s.read(32).intbe,
                               s.read(16).intbe))
-            addr.tags.append(('r',route))                
+            addr.tags.append(('r',route))
         elif tag == 'f':
             fallback = parse_fallback(tagdata, addr.currency)
             if fallback:
@@ -345,7 +351,7 @@ def lndecode(a, verbose=False):
             if data_length != 53:
                 addr.unknown_tags.append((tag, tagdata))
                 continue
-            addr.pubkey = secp256k1.PublicKey(flags=secp256k1.ALL_FLAGS)
+            addr.pubkey = secp256k1.PublicKey()
             addr.pubkey.deserialize(trim_to_bytes(tagdata))
         else:
             addr.unknown_tags.append((tag, tagdata))
@@ -371,8 +377,8 @@ def lndecode(a, verbose=False):
         addr.signature = addr.pubkey.ecdsa_deserialize_compact(sigdecoded[0:64])
         if not addr.pubkey.ecdsa_verify(bytearray([ord(c) for c in hrp]) + data.tobytes(), addr.signature):
             raise ValueError('Invalid signature')
-    else: # Recover pubkey from signature.
-        addr.pubkey = secp256k1.PublicKey(flags=secp256k1.ALL_FLAGS)
+    else:  # Recover pubkey from signature.
+        addr.pubkey = secp256k1.PublicKey()
         addr.signature = addr.pubkey.ecdsa_recoverable_deserialize(
             sigdecoded[0:64], sigdecoded[64])
         addr.pubkey.public_key = addr.pubkey.ecdsa_recover(
